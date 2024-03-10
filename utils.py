@@ -1,75 +1,27 @@
-import numpy as np
-import torch
-import matplotlib.pyplot as plt
-import os 
+import os
 import shutil
-import imageio
+import torch
 from tqdm import tqdm
 
-import matplotlib.pyplot as plt
-import os
-
-def plot_figure(x_train, y_train, y_pred, model, epoch, loss, figure_name):
-    plt.figure(figsize=(10, 6))
-    plt.plot(x_train.detach().numpy(), y_train.detach().numpy(), label='Actual')
-    plt.plot(x_train.detach().numpy(), y_pred.detach().numpy(), 'r', label='Predicted')
-    plt.title(f'Epoch {epoch} Loss: {loss:.8f}')
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.xlim([x_train.min(), x_train.max()])
-    plt.ylim([y_train.min()-1, 1.5*y_train.max()])
-    
-    last_layer_weights = model.fc_out.weight.data.tolist()[0]
-    last_layer_bias = model.fc_out.bias.data.item()
-    
-    if len(last_layer_weights) <= 6:
-        weights_text = 'Weights of Last Layer: ' + ', '.join([f'{w:.4f}' for w in last_layer_weights])
-        bias_text = 'Bias of Last Layer: ' + f'{last_layer_bias:.4f}'
-        info_text = f'{weights_text}\n{bias_text}'
-        
-        plt.text(0.05, 0.95, info_text, transform=plt.gca().transAxes, fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-        
-    plt.legend(loc='upper right')
-    plt.grid(True)
-    
-    figure_directory = figure_name.rsplit('/', 1)[0]
-    if not os.path.exists(figure_directory):
-        os.makedirs(figure_directory)
-    
-    save_path = f'{figure_name}/plot_epoch_{epoch}.png'
-    
-    plt.savefig(save_path)
-    plt.close()
-
-    return save_path
+from plotting import plot_figure, write_gif
 
 
-
-
-def save_gif(model_name, images):
-    
-    if not os.path.exists('gif'):
-        os.makedirs('gif')
-    
-    gif_path = f'gif/{model_name}.gif'
-    
-    with imageio.get_writer(gif_path, mode='I') as writer:
-        for filepath in images:
-            image = imageio.imread(filepath)
-            writer.append_data(image)
-    print(f"GIF saved at {gif_path}")
-
-    
-def train(model, x_train, y_train, num_epochs, optimizer, loss_fn, plot_interval, model_name, atol=1e-5):
+def train_func_approx(model, domain, solution, num_epochs, optimizer, loss_fn, device, atol=1e-5, plot_interval=10, gif_save_path=None):
     images = []
     last_save_path = False
     epoch_pbar = tqdm(range(num_epochs), desc="Training Progress", ncols=100)
 
+    if gif_save_path is not None:
+        gif_save_path = f"{gif_save_path}/{model.activation}_{'_'.join(map(str, model.hidden))}"
+
     for epoch in epoch_pbar:
         optimizer.zero_grad()
         
-        y_pred = model(x_train)
-        loss = loss_fn(y_pred, y_train)
+        model = model.to(device)
+        domain, solution = domain.to(device), solution.to(device)
+        
+        outputs = model(domain)
+        loss = loss_fn(outputs, solution)
         
         loss.backward()
         optimizer.step()
@@ -78,22 +30,23 @@ def train(model, x_train, y_train, num_epochs, optimizer, loss_fn, plot_interval
 
         if 0 < loss.item() < atol:
             print(f'Stopping criterion met at epoch {epoch}: Loss is less than {atol}.')
-            last_save_path = plot_figure(x_train, y_train, y_pred, model, epoch, loss, figure_name=model_name)
+            if gif_save_path is not None:
+                last_save_path = plot_figure(domain, solution, outputs, model, epoch, loss)
             break
         
     # - - GIF SAVING - - 
     
-        if epoch % plot_interval == 0 or epoch == num_epochs - 1:            
-            save_path = plot_figure(x_train, y_train, y_pred, model, epoch, loss, figure_name=model_name)
+        if gif_save_path is not None and (epoch % plot_interval == 0 or epoch == num_epochs - 1):            
+            save_path = plot_figure(domain, solution, outputs, model, epoch, loss)
             images.append(save_path)
     
-    if last_save_path:
-        images.append(last_save_path)
-    save_gif(model_name, images)
+    if gif_save_path is not None:
+        if last_save_path:
+            images.append(last_save_path)
+        write_gif(gif_save_path, images)
     
-    if os.path.exists(model_name):
-        shutil.rmtree(model_name)
-
+    if os.path.exists('temp'):
+        shutil.rmtree('temp')
 
 
 def select_available(cuda='all'):
