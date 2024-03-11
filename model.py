@@ -1,25 +1,33 @@
 import torch
 import torch.nn as nn
 
+
 class LinearBlock(nn.Module):
-    def __init__(self, channels_in, channels_out, activation):
+    def __init__(self, channels_in, channels_out, activation=None):
         super().__init__()
-        layers = [
-            nn.Linear(channels_in, channels_out, bias=True),
-        ]
-        match activation:
-            case 'relu':
-                layers.append(nn.ReLU())
-            case 'gelu':
-                layers.append(nn.GELU())
-            case 'tanh':
-                layers.append(nn.Tanh())
-
+        
+        layers = [nn.Linear(channels_in, channels_out, bias=True)]
+        self.activation = {
+            'relu': nn.ReLU(),
+            'gelu': nn.GELU(),
+            'tanh': nn.Tanh(),
+        }.get(activation, None)
+        
+        if activation is not None:
+            layers.append(self.activation)
+            
         self.layers = nn.Sequential(*layers)
-
+        
     def forward(self, x):
         return self.layers(x)
     
+    def _init_weights(self):
+        for layer in self.layers:
+            if hasattr(layer, 'weight') and layer.weight is not None:
+                nn.init.orthogonal_(layer.weight)
+            if hasattr(layer, 'bias') and layer.bias is not None:
+                nn.init.constant_(layer.bias, 0)
+
     
 class SinActivation(nn.Module):
     def forward(self, x):
@@ -30,7 +38,7 @@ class CosActivation(nn.Module):
         return torch.cos(x)
 
 class FourierBlock(nn.Module):
-    def __init__(self, channels_in, channels_out):
+    def __init__(self, channels_in, channels_out, activation=None):
         super().__init__()
         layers_sin = [
             nn.Linear(channels_in, channels_out, bias=False),
@@ -45,56 +53,44 @@ class FourierBlock(nn.Module):
         self.layers_cos = nn.Sequential(*layers_cos)
 
     def forward(self, x):
-        sin_part = self.layers_sin(x)
-        cos_part = self.layers_cos(x)
-        return sin_part + cos_part
+        return self.layers_sin(x) + self.layers_cos(x)
     
-    
-class FourierNet(nn.Module):
-    def __init__(self, input_features, hidden_layers, output_features):
-        super().__init__()
-        
-        self.activation = 'cas'
-        self.hidden = hidden_layers
-        self.fc_in = FourierBlock(input_features, hidden_layers[0])
+    def _init_weights(self):
+        for layers in [self.layers_sin, self.layers_cos]:
+            for layer in layers:
+                if hasattr(layer, 'weight') and layer.weight is not None:
+                    nn.init.orthogonal_(layer.weight)
 
-        layers = []
-        if len(hidden_layers) > 1:
-            for i in range(len(hidden_layers) - 1):
-                layers.append(FourierBlock(hidden_layers[i], hidden_layers[i+1]))
-        self.layers = nn.Sequential(*layers)
-        
-        self.fc_out = nn.Linear(hidden_layers[-1], output_features, bias=True)
     
-    def forward(self, x):
-        x = self.fc_in(x)
-        for layer in self.layers:
-            x = layer(x)
-        x = self.fc_out(x)
-        
-        return x
-    
-    
-class ClassicNet(nn.Module):
-    def __init__(self, input_features, hidden_layers, output_features, activation):
+class FCNet(nn.Module):
+    def __init__(self, input_features, hidden_layers, output_features, activation, init_weights=False):
         super().__init__()
         
+        self.input_features = input_features
+        self.hidden_layers = hidden_layers
+        self.output_features = output_features
         self.activation = activation
-        self.hidden = hidden_layers
-        self.fc_in = LinearBlock(input_features, hidden_layers[0], activation)
 
-        layers = []
-        if len(hidden_layers) > 1:
-            for i in range(len(hidden_layers) - 1):
-                layers.append(LinearBlock(hidden_layers[i], hidden_layers[i+1], activation))
-        self.layers = nn.Sequential(*layers)
+        blocks = self._create_blocks()
+        self.blocks = nn.Sequential(*blocks)
         
-        self.fc_out = nn.Linear(hidden_layers[-1], output_features, bias=True)
+        if init_weights:
+            self._init_weights()
     
     def forward(self, x):
-        x = self.fc_in(x)
-        for layer in self.layers:
-            x = layer(x)
-        x = self.fc_out(x)
+        return self.blocks(x)
+    
+    def _create_blocks(self):
         
-        return x
+        block_class = FourierBlock if self.activation=='cas' else LinearBlock
+        blocks = [block_class(self.input_features, self.hidden_layers[0], self.activation)]
+        if len(self.hidden_layers) > 1:
+            for i in range(len(self.hidden_layers) - 1):
+                blocks.append(block_class(self.hidden_layers[i], self.hidden_layers[i+1], self.activation))
+        blocks.append(LinearBlock(self.hidden_layers[-1], self.output_features, activation=None))
+        
+        return blocks
+    
+    def _init_weights(self):
+        for block in self.blocks:
+            block._init_weights()
