@@ -1,24 +1,22 @@
 import os
 import shutil
-import torch
 import inspect
+import torch
+from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 
 from plotting import plot_figure, write_gif
 
         
 class ODESolver:
-    def __init__(self, model, rhs_function, initial_conditions, device):
-        self.model = model
-        self.rhs_function = rhs_function
-        self.initial_conditions = initial_conditions
-        self.ode_order = len(inspect.signature(rhs_function).parameters) - 1
-        self.device = device
-    
-        self.lambda_domain = 1.0
-        self.lambda_ic = 1.0
+    def __init__(self, model, data, device):
         
-    def compute_domain_loss(self, domain, outputs, norm):
+        self.domain, self.rhs_function, self.initial_conditions = data
+        self.model = model
+        self.ode_order = len(inspect.signature(self.rhs_function).parameters) - 1
+        self.device = device
+        
+    def _compute_domain_loss(self, domain, outputs, norm):
         
         gradients = self._compute_gradients(domain, outputs)
         loss_fn = self._get_norm_func(norm)
@@ -30,7 +28,7 @@ class ODESolver:
 
         return loss_domain
 
-    def compute_ic_loss(self, initial_conditions, norm):
+    def _compute_ic_loss(self, initial_conditions, norm):
         x_0 = torch.tensor([initial_conditions[0]], requires_grad=True, device=self.device, dtype=torch.float32)
 
         output = self.model(x_0)
@@ -69,30 +67,43 @@ class ODESolver:
                 
         return loss_fn
     
-    def train(self, domain, num_epochs, optimizer, solution=None, atol=1e-5, save_gif=False):
+    def compile(self, optimizer, lr=1e-3, momentum=0.9, loss_weights=[1.0, 1.0]):
+
+        self.optimizer = {
+            'adam': torch.optim.Adam(self.model.parameters(), lr=lr),
+            'adagrad': torch.optim.Adagrad(self.model.parameters(), lr=lr),
+            'SGD': torch.optim.SGD(self.model.parameters(), lr=lr, momentum=momentum),
+            'LBFGS': torch.optim.LBFGS(self.model.parameters(), lr=lr)
+        }.get(optimizer, None)
         
+        self.lambda_domain, self.lambda_ic = loss_weights     
+    
+    def train(self, num_epochs, atol=1e-5, solution=None, save_gif=False):
+        
+        self.scheduler = StepLR(self.optimizer, step_size=num_epochs//100, gamma=0.95)
+
         losses_domain, losses_ic = [], []
-        epoch_pbar = tqdm(range(num_epochs), desc="Training Progress", ncols=100)
+        epoch_pbar = tqdm(range(num_epochs), desc="Training Progress", ncols=120)
 
         for epoch in epoch_pbar:
-            optimizer.zero_grad()
+            self.optimizer.zero_grad()
             
-            domain = domain.to(self.device)
+            domain = self.domain.to(self.device)
             domain.requires_grad_(True)
             solution = solution.to(self.device) if solution is not None else None
             
             outputs = self.model(domain)
 
-            loss_domain = self.compute_domain_loss(domain, outputs, norm='L2')
-            loss_ic = self.compute_ic_loss(self.initial_conditions, norm='L2')
+            loss_domain = self._compute_domain_loss(domain, outputs, norm='L2')
+            loss_ic = self._compute_ic_loss(self.initial_conditions, norm='L2')
             loss = self.lambda_domain * loss_domain + self.lambda_ic * loss_ic
             
             loss.backward()
-            optimizer.step()
-        
-            epoch_pbar.set_postfix_str(f"Train Loss: {loss.item():.8f}", refresh=True)
-            losses_domain.append(loss_domain.item())
+            self.optimizer.step()
+            self.scheduler.step()
             
+            epoch_pbar.set_postfix_str(f'Loss: {loss.item():.8f} | LR: {self.scheduler.get_last_lr()[0]:.8f}', refresh=True)
+            losses_domain.append(loss_domain.item())
             losses_ic.append(loss_ic.item())
 
             if 0 < loss.item() < atol:
@@ -110,7 +121,7 @@ class ODESolver:
             
     def create_gif(self, gif_save_path):
         
-        gif_save_path = f"{gif_save_path}/{self.model.activation}_{'_'.join(map(str, self.model.hidden))}"
+        gif_save_path = f"{gif_save_path}/{self.model.activation}_{'_'.join(map(str, self.model.hidden_layers))}"
         
         def sort_key(filename):
             return int(filename.split('_')[2].split('.')[0])
