@@ -39,8 +39,8 @@ def plot_figure(domain, outputs, solution=None, model=None, epoch=None, loss=Non
     else:
         plt.ylim([outputs_np.min()-1, 1.5*outputs_np.max()])
     
-    last_layer_weights = model.fc_out.weight.data.tolist()[0]
-    last_layer_bias = model.fc_out.bias.data.item()
+    last_layer_weights = model.blocks[-1].layers[-1].weight.data.tolist()[0]
+    last_layer_bias = model.blocks[-1].layers[-1].bias.data.item()
     
     if len(last_layer_weights) <= 6:
         weights_text = 'Weights of Last Layer: ' + ', '.join([f'{w:.4f}' for w in last_layer_weights])
