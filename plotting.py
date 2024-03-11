@@ -59,3 +59,16 @@ def plot_figure(domain, outputs, solution=None, model=None, epoch=None, loss=Non
     
     plt.savefig(save_path)
     plt.close()
+    
+    
+def plot_losses(losses_domain, losses_ic):
+    plt.figure(figsize=(10, 6))
+    plt.plot(losses_domain, label='Domain Loss', color='blue')
+    plt.plot(losses_ic, label='Initial Condition Loss', color='red')
+    plt.title('Losses During Training')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.yscale('log')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
