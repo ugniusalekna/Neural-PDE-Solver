@@ -12,7 +12,7 @@ def train_func_approx(model, domain, solution, num_epochs, optimizer, loss_fn, d
     epoch_pbar = tqdm(range(num_epochs), desc="Training Progress", ncols=100)
 
     if gif_save_path is not None:
-        gif_save_path = f"{gif_save_path}/{model.activation}_{'_'.join(map(str, model.hidden))}"
+        gif_save_path = f"{gif_save_path}/{model.activation}_{'_'.join(map(str, model.hidden_layers))}"
 
     for epoch in epoch_pbar:
         optimizer.zero_grad()
