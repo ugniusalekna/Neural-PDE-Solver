@@ -24,7 +24,7 @@ class LinearBlock(nn.Module):
     def _init_weights(self):
         for layer in self.layers:
             if hasattr(layer, 'weight') and layer.weight is not None:
-                nn.init.orthogonal_(layer.weight)
+                nn.init.xavier_uniform_(layer.weight)
             if hasattr(layer, 'bias') and layer.bias is not None:
                 nn.init.constant_(layer.bias, 0)
 
@@ -59,7 +59,7 @@ class FourierBlock(nn.Module):
         for layers in [self.layers_sin, self.layers_cos]:
             for layer in layers:
                 if hasattr(layer, 'weight') and layer.weight is not None:
-                    nn.init.orthogonal_(layer.weight)
+                    nn.init.xavier_uniform_(layer.weight)
 
     
 class FCNet(nn.Module):
@@ -76,10 +76,15 @@ class FCNet(nn.Module):
         
         if init_weights:
             self._init_weights()
+            
+        self.param_count = self._calculate_params()
     
     def forward(self, x):
         return self.blocks(x)
     
+    def _calculate_params(self):
+        return sum(p.numel() for p in self.parameters())
+
     def _create_blocks(self):
         
         block_class = FourierBlock if self.activation=='cas' else LinearBlock
