@@ -27,10 +27,16 @@ class Interval:
         
     
 class Data:
-    def __init__(self, domain, ode, ics, solution=None):
+    def __init__(self, domain, ode=None, ics=None, solution=None):
+        
         self.domain = domain.linspace
+        
         self.ode = ode
         self.ics = ics
-        self.solution = solution(self.domain) if solution is not None else None
+        
         self.solution_fn = solution
+        
+    @property
+    def get_solution(self):
+        return self.solution_fn(self.domain) if self.solution_fn is not None else None
         
