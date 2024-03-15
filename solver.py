@@ -9,27 +9,27 @@ from plotting import plot_figure, write_gif
 
         
 class ODESolver:
-    def __init__(self, model, data, device):
+    def __init__(self, model, data, device=torch.device('cpu')):
         
-        self.domain, self.rhs_function, self.initial_conditions = data
-        self.model = model
-        self.ode_order = len(inspect.signature(self.rhs_function).parameters) - 1
+        self.domain, self.ode, self.ics = data.domain, data.ode, data.ics
+        self.solution = data.solution
+        self.data = data
+        self.model = model.to(device)
+        self.ode_order = len(inspect.signature(self.ode).parameters) - 2
         self.device = device
+        self.zero = torch.tensor([0.0], requires_grad=True, device=self.device, dtype=torch.float32)
         
     def _compute_domain_loss(self, domain, outputs, norm):
         
         gradients = self._compute_gradients(domain, outputs)
         loss_fn = self._get_norm_func(norm)
         
-        if self.ode_order > 1:
-            loss_domain = loss_fn(gradients[-1], self.rhs_function(domain, outputs, *gradients[:-1]))
-        else:
-            loss_domain = loss_fn(gradients[-1], self.rhs_function(domain, outputs))
+        loss_domain = loss_fn(self.ode(domain, outputs, *gradients), self.zero)
 
         return loss_domain
 
-    def _compute_ic_loss(self, initial_conditions, norm):
-        x_0 = torch.tensor([initial_conditions[0]], requires_grad=True, device=self.device, dtype=torch.float32)
+    def _compute_ic_loss(self, ics, norm):
+        x_0 = torch.tensor([ics[0]], requires_grad=True, device=self.device, dtype=torch.float32)
 
         output = self.model(x_0)
         predicted_ics = [output] + self._compute_gradients(x_0, output)
@@ -38,7 +38,7 @@ class ODESolver:
         loss_fn = self._get_norm_func(norm)
 
         for i in range(1, self.ode_order + 1):
-            ic_loss += loss_fn(predicted_ics[i - 1], initial_conditions[i])
+            ic_loss += loss_fn(predicted_ics[i - 1], ics[i])
 
         return ic_loss
 
@@ -67,10 +67,11 @@ class ODESolver:
                 
         return loss_fn
     
-    def compile(self, optimizer, lr=1e-3, momentum=0.9, loss_weights=[1.0, 1.0]):
+    def compile(self, optimizer, lr=1e-3, momentum=0.9, weight_decay=0.01, loss_weights=[1.0, 1.0]):
 
         self.optimizer = {
             'adam': torch.optim.Adam(self.model.parameters(), lr=lr),
+            'adamW': torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay),
             'adagrad': torch.optim.Adagrad(self.model.parameters(), lr=lr),
             'SGD': torch.optim.SGD(self.model.parameters(), lr=lr, momentum=momentum),
             'LBFGS': torch.optim.LBFGS(self.model.parameters(), lr=lr)
@@ -78,7 +79,7 @@ class ODESolver:
         
         self.lambda_domain, self.lambda_ic = loss_weights     
     
-    def train(self, num_epochs, atol=1e-5, solution=None, save_gif=False):
+    def train(self, num_epochs, atol=1e-5, save_gif=False):
         
         self.scheduler = StepLR(self.optimizer, step_size=num_epochs//100, gamma=0.95)
 
@@ -90,12 +91,12 @@ class ODESolver:
             
             domain = self.domain.to(self.device)
             domain.requires_grad_(True)
-            solution = solution.to(self.device) if solution is not None else None
+            solution = self.solution.to(self.device) if self.solution is not None else None
             
             outputs = self.model(domain)
 
             loss_domain = self._compute_domain_loss(domain, outputs, norm='L2')
-            loss_ic = self._compute_ic_loss(self.initial_conditions, norm='L2')
+            loss_ic = self._compute_ic_loss(self.ics, norm='L2')
             loss = self.lambda_domain * loss_domain + self.lambda_ic * loss_ic
             
             loss.backward()
@@ -136,3 +137,50 @@ class ODESolver:
 
         if os.path.exists('temp'):
             shutil.rmtree('temp')
+            
+    def evaluate(self, value, exact_derivatives=None):
+        self.model.eval()
+        parameter_count = self.model.param_count
+        value = torch.tensor([value], requires_grad=True).to(self.device)
+        output = self.model(value)
+        computed_derivatives = self._compute_gradients(value, output)
+        
+        results = f"Model parameter count: {parameter_count}\n--- At t = {value.item():.4f} ---\n"
+        
+        if self.data.solution_fn is not None:
+            exact_value = self.data.solution_fn(value).item()
+            value_error = abs(output.item() - exact_value)
+            results += f"Solution | Computed: {output.item():.4f}, Exact: {exact_value:.4f}, Abs Error: {value_error:.4f}\n"
+        else:
+            results += f"Solution | Computed: {output.item():.4f}\n"
+
+        if exact_derivatives is not None:
+            for i, (computed_derivative, exact_derivative_fn) in enumerate(zip(computed_derivatives, exact_derivatives)):
+                exact_derivative = exact_derivative_fn(value)
+                derivative_error = abs(computed_derivative.item() - exact_derivative.item())
+                results += f"Derivative order {i+1} | Computed: {computed_derivative.item():.4f}, Exact: {exact_derivative.item():.4f}, Abs Error: {derivative_error:.4f}\n"
+        else:
+            for i, computed_derivative in enumerate(computed_derivatives):
+                results += f"Derivative order {i+1} | Computed: {computed_derivative.item():.4f}\n"
+
+        print(results)
+
+        # if self.data.solution_fn is not None:
+        #     exact_value = self.data.solution_fn(value).item()
+        #     value_error = abs(output.item() - exact_value)
+
+        #     results += (
+        #         f"Prediction: {output.item():.4f}, Exact: {exact_value:.4f}, Abs Error: {value_error:.4f}\n"
+        #     )
+        # else:
+        #     results += f"Prediction: {output.item():.4f}\n"
+
+        # if exact_derivatives is not None and len(exact_derivatives) > 0:
+        #     exact_dy = exact_derivatives[0](value).item()
+        #     dy_error = abs(value.grad.item() - exact_dy)
+
+        #     results += f"Derivative: {value.grad.item():.4f}, Exact: {exact_dy:.4f}, Abs Error: {dy_error:.4f}\n"
+        # else:
+        #     results += f"Derivative: {value.grad.item():.4f}\n"
+            
+        # print(results)
