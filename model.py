@@ -48,7 +48,6 @@ class FourierBlock(nn.Module):
             nn.Linear(channels_in, channels_out, bias=False),
             CosActivation(),
         ]
-        
         self.layers_sin = nn.Sequential(*layers_sin)
         self.layers_cos = nn.Sequential(*layers_cos)
 
