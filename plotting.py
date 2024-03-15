@@ -1,49 +1,40 @@
 import os
-import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import imageio
 
 
-class ODEPlotter:
+class BasePlotter:
     def __init__(self, solver):
-        
         self.solver = solver
         self.model = solver.model
         self.domain = self._get_domain()
         self.output = self._get_output()
-        self.derivatives = self._get_derivatives()
         self.solution = self._get_solution()
-        
+
     def _get_domain(self, torch=False):
         return self.solver.domain.detach().cpu().numpy() if not torch else self.solver.domain.detach().cpu()
-    
+
     def _get_output(self):
         domain = self.solver.domain
         output = self.model(domain)
         return output.detach().cpu().numpy()
-    
-    def _get_derivatives(self):
-        domain = self.solver.domain
-        output = self.model(domain)
-        derivatives = self.solver._compute_gradients(domain, output)
-        return [d.detach().cpu().numpy() for d in derivatives]
 
     def _get_solution(self):
         return self.solver.solution.detach().cpu().numpy() if self.solver.solution is not None else None
         
-    def losses(self, losses_domain, losses_ic):
+    def losses(self, loss_records):
         plt.figure(figsize=(10, 6))
-        plt.plot(losses_domain, label='Domain Loss', color='blue')
-        plt.plot(losses_ic, label='Initial Condition Loss', color='red')
-        plt.title('Losses During Training')
+        for name, loss in loss_records.items():
+            plt.plot(loss, label=name)
+        plt.title('Losses over epochs')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
         plt.yscale('log')
         plt.grid(True)
         plt.legend()
         plt.show()
-        
+
     def numerical_solution(self):
         plt.figure(figsize=(10, 6))
         plt.plot(self.domain, self.output, label='Approximated', color='red')
@@ -55,7 +46,20 @@ class ODEPlotter:
         plt.legend()
         plt.title('Solution vs time')
         plt.show()
+
+
+class ODEPlotter(BasePlotter):
+    def __init__(self, solver):
+        super().__init__(solver)
+        self.derivatives = self._get_derivatives()
+        self.solution = self._get_solution()
         
+    def _get_derivatives(self):
+        domain = self.solver.domain
+        output = self.model(domain)
+        derivatives = self.solver._compute_gradients(domain, output)
+        return [d.detach().cpu().numpy() for d in derivatives]
+
     def phase_space(self, exact_derivatives=None):
         ode_order = self.solver.ode_order
         if ode_order == 2:
@@ -118,7 +122,7 @@ class ODEPlotter:
     
     
 def write_gif(save_path, images):
-    
+
     if not os.path.exists(save_path.split("/")[0]):
         os.makedirs(save_path.split("/")[0] )
     
@@ -164,7 +168,7 @@ def plot_figure(domain, outputs, solution=None, model=None, epoch=None, loss=Non
         
     plt.legend(loc='upper right')
     plt.grid(True)
-    
+
     if not os.path.exists('temp'):
         os.makedirs('temp')
     
