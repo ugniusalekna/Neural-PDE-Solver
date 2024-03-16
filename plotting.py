@@ -44,7 +44,7 @@ class BasePlotter:
         plt.ylabel('$y(t)$')
         plt.grid(True)
         plt.legend()
-        plt.title('Solution vs time')
+        plt.title('Solution plot')
         plt.show()
 
 
