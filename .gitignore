@@ -2,3 +2,4 @@ gif/
 gif*/
 __pycache__
 temp/
+.DS_Store
