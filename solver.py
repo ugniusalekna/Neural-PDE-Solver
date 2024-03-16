@@ -49,10 +49,10 @@ class BaseSolver:
 
     def _get_norm_func(self, norm):
         loss_fn = {
-            'L1': lambda x, y: torch.mean(torch.abs(x - y)),
-            'L2': lambda x, y: torch.mean((x - y)**2),
+            'L1': torch.nn.L1Loss(),
+            'L2': torch.nn.MSELoss(),
             'Linf': lambda x, y: torch.max(torch.abs(x - y))
-        }.get(norm, None)        
+        }.get(norm, None)       
         return loss_fn
     
     def train(self, num_epochs, atol=1e-5, save_gif=False):
@@ -110,8 +110,7 @@ class FunctionApproximator(BaseSolver):
         self.solution = data.get_solution
     
     def compute_loss(self, domain, outputs, loss_records):
-        # loss_fn = self._get_norm_func(norm='L2')
-        loss_fn = torch.nn.MSELoss()
+        loss_fn = self._get_norm_func(norm='L2')
         loss = loss_fn(outputs, self.solution.detach().to(self.device))
         loss_records['loss'].append(loss.item())
         return loss
@@ -137,7 +136,6 @@ class ODESolver(BaseSolver):
         self.ode, self.ics = data.ode, data.ics
         self.solution = data.get_solution
         self.ode_order = len(inspect.signature(self.ode).parameters) - 2
-        self.zero = torch.tensor([0.0], requires_grad=True, device=self.device, dtype=torch.float32)
                 
     def compile(self, optimizer, lr=1e-3, loss_weights=[1.0, 1.0], **kwargs):
         super().compile(optimizer, lr, **kwargs)
@@ -171,8 +169,9 @@ class ODESolver(BaseSolver):
         
         gradients = self._compute_gradients(domain, outputs)
         loss_fn = self._get_norm_func(norm)
-        
-        loss_domain = loss_fn(self.ode(domain, outputs, *gradients), self.zero)
+        ode = self.ode(domain, outputs, *gradients)
+        zero = torch.zeros_like(ode, dtype=torch.float32, device=self.device, requires_grad=True)
+        loss_domain = loss_fn(ode, zero)
 
         return loss_domain
 
@@ -181,13 +180,16 @@ class ODESolver(BaseSolver):
 
         output = self.model(x_0)
         predicted_ics = [output] + self._compute_gradients(x_0, output)
+        true_ics = [torch.tensor([value], device=self.device, dtype=torch.float32) if not torch.is_tensor(value) else value.view(1, -1) for value in ics]
 
         ic_loss = 0
         loss_fn = self._get_norm_func(norm)
 
         for i in range(1, self.ode_order + 1):
-            ic_loss += loss_fn(predicted_ics[i - 1], ics[i])
-
+            pred_ic = predicted_ics[i - 1].view(1, -1)
+            true_ic = true_ics[i].view(1, -1)
+            ic_loss += loss_fn(pred_ic, true_ic)
+            
         return ic_loss
 
     def evaluate(self, value, exact_derivatives=None):
