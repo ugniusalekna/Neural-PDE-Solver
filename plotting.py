@@ -66,7 +66,7 @@ class ODEPlotter(BasePlotter):
     def _get_derivatives(self):
         domain = self.solver.domain
         output = self.model(domain)
-        derivatives = self.solver._compute_gradients(domain, output)
+        derivatives = self.solver.compute_derivatives(domain, output)
         return [d.detach().cpu().numpy() for d in derivatives]
 
     def phase_space(self, exact_derivatives=None):
@@ -101,7 +101,7 @@ class ODEPlotter(BasePlotter):
         plt.ylabel('$y_2(t)$' if self.system else '$y\'(t)$')
         plt.grid(True)
         plt.legend()
-        plt.title('Phase space')
+        plt.title('Phase portrait')
         plt.show()
         
     def _plot_3d_phase_space(self, exact_derivatives):
