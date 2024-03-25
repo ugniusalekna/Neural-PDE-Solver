@@ -69,7 +69,7 @@ class ODEPlotter(BasePlotter):
         derivatives = self.solver.compute_derivatives(domain, output)
         return [d.detach().cpu().numpy() for d in derivatives]
 
-    def phase_space(self, exact_derivatives=None):
+    def phase_portrait(self, exact_derivatives=None):
         count = self.n_equations if self.system else self.solver.ode_order
         if count == 2:
             self._plot_2d_phase_space(exact_derivatives)
@@ -94,7 +94,7 @@ class ODEPlotter(BasePlotter):
         if self.solution is not None:
             if self.system:
                 plt.plot(self.solution[0], self.solution[1], label='Exact', color='blue')
-            elif exact_derivatives is not None:
+            elif not self.system and exact_derivatives is not None:
                 exact_dy = exact_derivatives[0](self._get_domain(torch=True)).detach().cpu().numpy()
                 plt.plot(self.solution[0], exact_dy, label='Exact', color='blue')            
         plt.xlabel('$y_1(t)$' if self.system else '$y(t)$')
@@ -114,7 +114,7 @@ class ODEPlotter(BasePlotter):
         if self.solution is not None:
             if self.system:
                 ax.plot(self.solution[0], self.solution[1], self.solution[2], label='Exact', color='blue')
-            elif exact_derivatives is not None:
+            elif not self.system and exact_derivatives is not None:
                 exact_dy = exact_derivatives[0](self._get_domain(torch=True)).detach().cpu().numpy()
                 exact_dy2 = exact_derivatives[1](self._get_domain(torch=True)).detach().cpu().numpy()
                 ax.plot(self.solution[0], exact_dy, exact_dy2, label='Exact', color='blue')
